@@ -17,7 +17,7 @@ app.use("/tasks", require('./routes/tasks.routes'));
 app.use(errorHandler);
 
 const port = process.env.PORT || 5000
-global.myDB = connectDatabase().then(() => {
+connectDatabase().then(() => {
     app.listen(port, () => {
         console.log(`Server listening on port ${port}`);
     })
