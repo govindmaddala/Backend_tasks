@@ -1,32 +1,39 @@
 require('dotenv').config('./.env');
+const errorHandler = require('./middleware/ErrorHandler')
 const express = require("express");
 const app = express();
-const http = require("http");
 const cors = require('cors')
 const bodyParser = require("body-parser");
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
-app.use(cors());
-const { apiRoute } = require('./routes/nodeRoues.routes');
-const morgan = require('morgan')
-app.use(morgan('dev'))
-const dbConnect = require('./databases/ConnectDb')
-const server = http.createServer(app);
+const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
+const userRoute = require('./routes/users.routes')
+const jwt = require('jsonwebtoken');
+const pool = require('./Database/ConnectDatabase');
+const moment = require('moment')
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 
 const PDFDocument = require('pdf-lib').PDFDocument
 
-var io = require("socket.io")(server, {
-    cors: {
-        // origin: "*",
-        origin: "http://localhost:3000",
-    },
-});
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+app.use(cookieParser());
+const corsOptions = {
+    origin: "*",
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true, // Enable CORS credentials (cookies, headers)
+};
+app.use(cors(corsOptions));
+app.use(morgan('dev'));
+app.use(cookieParser());
 
-app.use("/getNodeMessage/", apiRoute);
-app.use("/api", apiRoute);
+app.use(errorHandler)
+
+const port = process.env.PORT || 5000;
+
+app.use('/api/proventech/users', userRoute)
+app.use('/api/proventech/masters', require('./routes/masters.routes'))
 
 const uploadFolder = 'uploads';
 // Set up storage for multer
@@ -46,12 +53,12 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Handle PDF file uploads
-app.post('/api/upload-files', upload.single('pdfFile'), (req, res) => {
+app.post('/api/proventech/upload', upload.single('pdfFile'), (req, res) => {
     res.json({ message: 'File uploaded successfully' });
 });
 
 // API endpoint to get the list of file names
-app.get('/api/get-all-files', (req, res) => {
+app.get('/api/proventech/files', (req, res) => {
     const files = getFilesInUploadsFolder();
     res.json({ files });
 });
@@ -71,7 +78,7 @@ function getFilesInUploadsFolder() {
 
 const outputFolder = "Output"
 
-app.post('/api/mergePdfs', upload.array('pdfFiles', 10), async (req, res) => {
+app.post('/api/proventech/mergePdfs', upload.array('pdfFiles', 10), async (req, res) => {
     try {
         const files = getFilesInUploadsFolder();
         const folderPath = path.join(__dirname, uploadFolder);
@@ -98,19 +105,41 @@ app.post('/api/mergePdfs', upload.array('pdfFiles', 10), async (req, res) => {
                 });
             });
         });
-
+        
     } catch (error) {
         console.error('Error uploading and merging PDFs:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
-const port = process.env.PORT || 5123
 
-server.listen(port, async () => {
-    dbConnect.databaseConnect("chatApp", "users")
-    console.log(`App is listening on ${port}`);
+
+
+app.post("/insertData", async (req, res) => {
+    let creation_date = moment(new Date()).format("YYYY-MM-DD HH:mm:ss")
+    console.log(creation_date)
+    let query = `INSERT INTO tech_transfer_package (project_id, project_code, molecule_phase, tech_transfer_phase,creation_date,attachment_percentage,status,url
+    ) values 
+    ('DTT-04', 'GHJ', 'Phase-03','New', '${creation_date}',100,'Approved', 'http://localhost:3000/dashboard'),
+    ('DTT-05', 'RTY', 'Phase-01','Addendum', '${creation_date}',40,'Rejected', 'http://localhost:3000/dashboard')
+    `
+    const client = await pool.connect();
+    const dataInserted = await client.query(query);
+
+    console.log(dataInserted)
+
+    if (dataInserted.rowCount > 0) {
+        if (client) client.release();
+        return res.status(201).json({ error: "Data Inserted" });
+    }
+})
+
+
+app.get("/dummy", (req, res, next) => {
+    res.cookie("jwt_token", "govind", { httpOnly: true })
+    return res.send({ message: "sent cookie" })
+})
+
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
 });
-
-const socketIoObject = io;
-module.exports.ioObject = socketIoObject;
